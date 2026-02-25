@@ -1,0 +1,21 @@
+# Data files
+data/
+
+# Env (secrets)
+.env
+
+# Cursor files
+.cursor/
+
+# Local dev scripts
+trigger_add_submodules.py
+trigger_start_translation.py
+delete_cppdigest_lib_repos.py
+push_project.py
+
+reset_and_redeploy.ps1
+update-add-submodules.ps1
+update-start-translation.ps1
+trigger-sync-translation.ps1
+trigger-start-translation.ps1
+trigger-add-submodules.ps1

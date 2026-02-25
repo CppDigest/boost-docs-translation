@@ -1,0 +1,50 @@
+# Create a versioned tag when a PR from boost-{repo}-translation-{version}-{lang_code} into local is merged.
+# Tag format: {version}-{lang_code} (e.g. boost-1.89.0-zh_Hans). Skipped if the tag already exists.
+# Including lang_code in the tag avoids collisions when multiple languages target the same version.
+# Workflow must exist on the default branch (master).
+#
+# NOTE: "boost-SUBMODULE-translation-" below is a placeholder for the repository name.
+# It is replaced with "boost-{repo}-translation-" by add-submodules.yml when this file
+# is copied into each submodule repository.
+
+name: create-tag
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [local]
+
+permissions:
+  contents: write
+
+jobs:
+  create-tag:
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.merged == true && startsWith(github.event.pull_request.head.ref, 'boost-SUBMODULE-translation-')
+    steps:
+      - name: Extract version and lang_code from source branch
+        id: tagname
+        run: |
+          HEAD_REF="${{ github.event.pull_request.head.ref }}"
+          # e.g. boost-algorithm-translation-boost-1.89.0-zh_Hans -> boost-1.89.0-zh_Hans
+          TAGNAME="${HEAD_REF#boost-SUBMODULE-translation-}"
+          echo "tagname=$TAGNAME" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout local branch with tags
+        uses: actions/checkout@v4
+        with:
+          ref: local
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Create and push tag
+        run: |
+          TAGNAME="${{ steps.tagname.outputs.tagname }}"
+          if git tag -l "$TAGNAME" | grep -q "^${TAGNAME}$"; then
+            echo "Tag $TAGNAME already exists, skipping."
+            exit 0
+          fi
+          git config user.name "Boost-Translation-CI-Bot"
+          git config user.email "Boost-Translation-CI-Bot@cppdigest.local"
+          git tag "$TAGNAME"
+          git push origin "$TAGNAME"
