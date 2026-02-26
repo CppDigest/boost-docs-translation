@@ -1,18 +1,14 @@
-# Create a versioned tag when a PR from boost-{repo}-translation-{version}-{lang_code} into local is merged.
-# Tag format: {version}-{lang_code} (e.g. boost-1.89.0-zh_Hans). Skipped if the tag already exists.
-# Including lang_code in the tag avoids collisions when multiple languages target the same version.
+# Create a versioned tag when a PR from translation-{lang_code}-{version} into local-{lang_code} is merged.
+# Tag format: {version}-{lang_code}-{repo}-translation (e.g. boost-1.89.0-zh_Hans-algorithm-translation).
+# Skipped if the tag already exists.
 # Workflow must exist on the default branch (master).
-#
-# NOTE: "boost-SUBMODULE-translation-" below is a placeholder for the repository name.
-# It is replaced with "boost-{repo}-translation-" by add-submodules.yml when this file
-# is copied into each submodule repository.
 
 name: create-tag
 
 on:
   pull_request:
     types: [closed]
-    branches: [local]
+    branches: ['local-*']
 
 permissions:
   contents: write
@@ -20,20 +16,30 @@ permissions:
 jobs:
   create-tag:
     runs-on: ubuntu-latest
-    if: github.event.pull_request.merged == true && startsWith(github.event.pull_request.head.ref, 'boost-SUBMODULE-translation-')
+    if: github.event.pull_request.merged == true && startsWith(github.event.pull_request.head.ref, 'translation-')
     steps:
-      - name: Extract version and lang_code from source branch
+      - name: Extract version and lang_code from branches
         id: tagname
         run: |
           HEAD_REF="${{ github.event.pull_request.head.ref }}"
-          # e.g. boost-algorithm-translation-boost-1.89.0-zh_Hans -> boost-1.89.0-zh_Hans
-          TAGNAME="${HEAD_REF#boost-SUBMODULE-translation-}"
+          BASE_REF="${{ github.event.pull_request.base.ref }}"
+          REPO="${{ github.event.repository.name }}"
+
+          # lang_code from base branch: local-zh_Hans -> zh_Hans
+          LANG_CODE="${BASE_REF#local-}"
+
+          # version from head branch: translation-zh_Hans-boost-1.89.0 -> strip "translation-${LANG_CODE}-boost-" -> 1.89.0
+          VERSION_FULL="${HEAD_REF#translation-${LANG_CODE}-}"
+          VERSION="${VERSION_FULL#boost-}"
+
+          # e.g. boost-1.89.0-zh_Hans-algorithm-translation
+          TAGNAME="boost-${VERSION}-${LANG_CODE}-${REPO}-translation"
           echo "tagname=$TAGNAME" >> "$GITHUB_OUTPUT"
 
-      - name: Checkout local branch with tags
+      - name: Checkout local-{lang_code} branch with tags
         uses: actions/checkout@v4
         with:
-          ref: local
+          ref: ${{ github.event.pull_request.base.ref }}
           fetch-depth: 0
           fetch-tags: true
 

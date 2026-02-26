@@ -5,25 +5,23 @@ submodule documentation repositories during the add-submodules process.
 
 ## create-tag.yml
 
-**Purpose:** Tags a submodule repository with a Boost version string whenever a Weblate
-translation PR is merged into the `local` branch.
+**Purpose:** Tags a CppDigest lib repo whenever a Weblate translation PR is merged into a
+`local-{lang_code}` branch.
 
 **How it works:**
 
-1. Triggers on any `pull_request` closed event targeting the `local` branch.
-2. If the PR was merged and its head branch matches `boost-<repo>-translation-*`
-   (e.g. `boost-algorithm-translation-boost-1.89.0`), extracts the version suffix
-   (e.g. `boost-1.89.0`).
-3. Checks out the `local` branch with full tag history.
-4. Creates and pushes a tag named after the version (e.g. `boost-1.89.0`) unless it
-   already exists.
+1. Triggers on any `pull_request` closed event targeting a `local-*` branch.
+2. If the PR was merged and its head branch matches `translation-*`
+   (e.g. `translation-zh_Hans-1.89.0`):
+   - Extracts `lang_code` from the base branch: `local-zh_Hans` → `zh_Hans`.
+   - Extracts `version` from the head branch: `translation-zh_Hans-boost-1.89.0` → `1.89.0`.
+   - Builds the tag: `boost-{repo}-translation-{version}-{lang_code}`
+     (e.g. `boost-algorithm-translation-1.89.0-zh_Hans`).
+3. Checks out the `local-{lang_code}` branch with full tag history.
+4. Creates and pushes the tag unless it already exists.
 
 **How it gets there:**
 
-`add-submodules.yml` (`add_create_tag_workflow`) copies this file into each newly created
-submodule repo at `.github/workflows/create-tag.yml`, replacing the placeholder prefix
-`boost-SUBMODULE-translation-` with `boost-<submodule-name>-translation-` so the trigger
-matches that specific library's translation branches.
-
-**Do not edit the placeholder name** (`boost-SUBMODULE-translation-`) directly — it is the
-sed target used by `add_create_tag_workflow` during submodule setup.
+`add-submodules.yml` and `start-translation.yml` (`add_create_tag_workflow`) copy this file
+directly into each CppDigest lib repo at `.github/workflows/create-tag.yml`. No placeholder
+substitution is needed; the repo name is read at runtime from `github.event.repository.name`.

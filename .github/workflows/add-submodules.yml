@@ -22,7 +22,6 @@ on:
 env:
   ORG: CppDigest
   TRANSLATIONS_REPO: boost-docs-translation
-  MASTER_BRANCH: master
 
 jobs:
   add-submodule:
@@ -56,7 +55,7 @@ jobs:
           BOT_NAME="Boost-Translation-CI-Bot"
           BOT_EMAIL="Boost-Translation-CI-Bot@$ORG.local"
           BOOST_ORG="whisper67265"
-          MASTER_BR="master"
+          MASTER_BRANCH="master"
           UPDATES=()
 
           WORK_DIR=$(mktemp -d)
@@ -157,13 +156,12 @@ jobs:
 
           # ── Organization repo helpers ────────────────────────────────────────
 
-          # Copy create-tag.yml asset into repo, patching the branch-prefix placeholder.
+          # Copy create-tag.yml asset into repo.
           add_create_tag_workflow() {
-            local repo_dir="$1" sub_name="$2" wf_dir="$1/.github/workflows"
+            local repo_dir="$1" wf_dir="$1/.github/workflows"
             mkdir -p "$wf_dir"
-            sed "s/boost-SUBMODULE-translation-/boost-${sub_name}-translation-/g" \
-              "$GITHUB_WORKSPACE/.github/workflows/assets/create-tag.yml" \
-              > "$wf_dir/create-tag.yml"
+            cp "$GITHUB_WORKSPACE/.github/workflows/assets/create-tag.yml" \
+              "$wf_dir/create-tag.yml"
             git -C "$repo_dir" add ".github/workflows/create-tag.yml"
             git -C "$repo_dir" commit -m "Add create-tag workflow"
           }
@@ -175,18 +173,18 @@ jobs:
             set_git_bot_config "$sub_clone"
             git -C "$sub_clone" add -A
             git -C "$sub_clone" commit -m "Create the original documentation of $libs_ref"
-            git -C "$sub_clone" branch -M "$MASTER_BR"
+            git -C "$sub_clone" branch -M "$MASTER_BRANCH"
             git -C "$sub_clone" remote remove origin 2>/dev/null || true
             git -C "$sub_clone" remote add origin "$repo_url"
-            git -C "$sub_clone" push -u origin "$MASTER_BR"
-            git -C "$sub_clone" push origin "$MASTER_BR"
+            git -C "$sub_clone" push -u origin "$MASTER_BRANCH"
+            git -C "$sub_clone" push origin "$MASTER_BRANCH"
             for lang_code in "${lang_codes_arr[@]}"; do
               local local_br="local-${lang_code}"
-              git -C "$sub_clone" checkout -B "$local_br" "$MASTER_BR"
-              add_create_tag_workflow "$sub_clone" "$sub_name"
+              git -C "$sub_clone" checkout -B "$local_br" "$MASTER_BRANCH"
+              add_create_tag_workflow "$sub_clone"
               git -C "$sub_clone" push -u origin "$local_br"
             done
-            set_default_branch "$org" "$sub_name" "$MASTER_BR"
+            set_default_branch "$org" "$sub_name" "$MASTER_BRANCH"
           }
 
           # ── Translations repo helpers ─────────────────────────────────────────
@@ -197,8 +195,8 @@ jobs:
             if git -C "$dir" ls-remote --exit-code --heads origin "$branch" &>/dev/null; then
               echo "  Branch $branch already exists in $TRANSLATIONS_REPO." >&2
             else
-              echo "  Creating branch $branch in $TRANSLATIONS_REPO from $MASTER_BR..." >&2
-              git -C "$dir" checkout -B "$MASTER_BR" "origin/$MASTER_BR"
+              echo "  Creating branch $branch in $TRANSLATIONS_REPO from $MASTER_BRANCH..." >&2
+              git -C "$dir" checkout -B "$MASTER_BRANCH" "origin/$MASTER_BRANCH"
               git -C "$dir" checkout -b "$branch"
               rm -rf "$dir/libs" "$dir/.gitmodules"
               git -C "$dir" rm -rf --cached libs .gitmodules 2>/dev/null || true
@@ -210,7 +208,7 @@ jobs:
 
           ensure_translations_cloned() {
             [[ -d "$3/.git" ]] && return
-            clone_repo "https://github.com/${1}/${2}.git" "$MASTER_BR" "$3" keep
+            clone_repo "https://github.com/${1}/${2}.git" "$MASTER_BRANCH" "$3" keep
             set_git_bot_config "$3"
           }
 
@@ -264,7 +262,7 @@ jobs:
             local dir="$1" libs_ref="$2"
             [[ ${#UPDATES[@]} -eq 0 ]] && return
             git -C "$dir" fetch origin 2>/dev/null || true
-            sync_translations_branch "$dir" "$MASTER_BR" "$libs_ref"
+            sync_translations_branch "$dir" "$MASTER_BRANCH" "$libs_ref"
             for lang_code in "${lang_codes_arr[@]}"; do
               sync_translations_branch "$dir" "local-${lang_code}" "$libs_ref" true
             done

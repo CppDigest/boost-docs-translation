@@ -4,17 +4,23 @@
 # Example: POST /repos/{owner}/{repo}/dispatches
 #   Body: {"event_type": "start-translation", "client_payload": {"version": "boost-1.90.0"}}
 #
-# Submodules list is taken from .gitmodules of ORG/TRANSLATIONS_REPO at MASTER_BRANCH
-# (only libs/ entries). Same update logic as add-submodule; no new submodules are added.
+# Submodules list is taken from .gitmodules of ORG/TRANSLATIONS_REPO at master branch
+# (only libs/ entries). No new org repos are created; run add-submodules first.
+#
+# For each lang_code in LANG_CODES:
+#   1. Ensures TRANSLATIONS_REPO has a "local-{lang_code}" branch.
+#   2. For each submodule: syncs CppDigest master, then handles "local-{lang_code}" in the
+#      CppDigest lib repo (creates if missing, or merges master if no open translation PR).
+#   3. Updates TRANSLATIONS_REPO master and each "local-{lang_code}" submodule pointer.
+#   4. POSTs to Weblate with add_or_update map: {lang_code: [submodules, ...]}.
 #
 # client_payload:
-#   lang_codes: (optional) Language code for Weblate (e.g. zh_Hans). Defaults to secrets.LANG_CODES.
-#   version: (optional) Boost release ref (e.g. boost-1.90.0). If set: used for both boost repo (.gitmodules)
-#     and individual library repos. If omitted: boost repo uses master, library repos use develop.
-#   extensions: (optional) List-like or JSON string for Weblate file extensions (e.g. [.adoc, .md]). Default empty.
+#   lang_codes: (optional) Comma-separated lang codes (e.g. zh_Hans,ja). Defaults to secrets.LANG_CODES.
+#   version: (optional) Boost release ref (e.g. boost-1.90.0). Defaults to develop.
+#   extensions: (optional) File extensions for Weblate (e.g. [.adoc, .md]). Default empty.
 #
-# Required secret: SYNC_TOKEN — PAT with repo (and org repo create) permissions for org.
-# Optional secrets (to trigger Weblate add-or-update at end): WEBLATE_URL, WEBLATE_TOKEN, LANG_CODES.
+# Required secrets: SYNC_TOKEN, WEBLATE_URL, WEBLATE_TOKEN.
+# Optional secret: LANG_CODES (used when lang_codes not in client_payload).
 
 name: Start translation
 
@@ -74,9 +80,8 @@ jobs:
           BOT_NAME="Boost-Translation-CI-Bot"
           BOT_EMAIL="Boost-Translation-CI-Bot@$ORG.local"
           BOOST_ORG="whisper67265"
-          MASTER_BR="master"
-          LOCAL_BR="local"
           UPDATES=()
+          declare -A add_or_update
 
           WORK_DIR=$(mktemp -d)
           trap 'rm -rf "$WORK_DIR"' EXIT
@@ -100,20 +105,13 @@ jobs:
 
           repo_exists() { gh repo view "$1/$2" &>/dev/null; }
 
-          create_repo() {
-            gh repo create "$1/$2" --public > /dev/null \
-              || { echo "Create repo $1/$2 failed" >&2; return 1; }
-          }
-
-          set_default_branch() {
-            gh api --method PATCH "repos/$1/$2" -f "default_branch=$3" \
-              || echo "Warning: set default branch to $3 failed." >&2
-          }
-
-          # Returns 0 if org/repo has an open PR with head matching "boost-<repo>-translation-*".
+          # Returns 0 if org/repo has an open PR into local-{lang_code} with head matching
+          # "translation-{lang_code}-*".
           has_open_translation_pr() {
-            gh pr list --repo "$1/$2" --state open --json headRefName \
-              --jq ".[] | select(.headRefName | startswith(\"boost-$2-translation-\")) | .headRefName" \
+            local org="$1" repo="$2" lang_code="$3"
+            local base_br="local-${lang_code}"
+            gh pr list --repo "$org/$repo" --state open --base "$base_br" --json headRefName \
+              --jq ".[] | select(.headRefName | startswith(\"translation-${lang_code}-\")) | .headRefName" \
               2>/dev/null | grep -q .
           }
 
@@ -184,63 +182,94 @@ jobs:
 
           # ── Organization repo sync helpers ──────────────────────────────────────
 
-          update_local_merge_from_master() {
-            local repo_dir="$1"
-            git -C "$repo_dir" fetch origin "$MASTER_BR"
-            git -C "$repo_dir" fetch origin "$LOCAL_BR" 2>/dev/null || true
-            git -C "$repo_dir" checkout -B "$LOCAL_BR" "origin/$LOCAL_BR"
-            git -C "$repo_dir" merge "origin/$MASTER_BR"
-            git -C "$repo_dir" push origin "${LOCAL_BR}:${LOCAL_BR}"
-          }
-
-          # Wipe dest_repo (except .git), copy pruned source, commit, push master.
-          # Then update the local branch unless an open translation PR exists.
-          sync_existing_repo() {
-            local dest_repo="$1" sub_clone="$2" libs_ref="$3" org="$4" sub_name="$5"
+          # Wipe dest_repo (except .git), copy pruned source, commit, push master only.
+          sync_repo_master() {
+            local dest_repo="$1" sub_clone="$2" libs_ref="$3"
             find "$dest_repo" -mindepth 1 -maxdepth 1 ! -name '.git' -exec rm -rf {} +
             cp -r "$sub_clone/." "$dest_repo/"
             set_git_bot_config "$dest_repo"
             git -C "$dest_repo" add -A
             git -C "$dest_repo" commit -m "Update the original documentation of $libs_ref" 2>/dev/null || true
-            git -C "$dest_repo" push origin "$MASTER_BR"
-            if has_open_translation_pr "$org" "$sub_name"; then return; fi
-            update_local_merge_from_master "$dest_repo"
+            git -C "$dest_repo" push origin "$MASTER_BRANCH"
           }
 
-          # Copy create-tag.yml asset into repo, patching the branch-prefix placeholder.
+          # Merge master into local-{lang_code} and push.
+          update_local_merge_from_master() {
+            local repo_dir="$1" lang_code="$2"
+            local local_br="local-${lang_code}"
+            git -C "$repo_dir" fetch origin "$MASTER_BRANCH"
+            git -C "$repo_dir" fetch origin "$local_br" 2>/dev/null || true
+            git -C "$repo_dir" checkout -B "$local_br" "origin/$local_br"
+            git -C "$repo_dir" merge "origin/$MASTER_BRANCH"
+            git -C "$repo_dir" push origin "${local_br}:${local_br}"
+          }
+
+          # Copy create-tag.yml asset into a CppDigest lib repo.
           add_create_tag_workflow() {
-            local repo_dir="$1" sub_name="$2" wf_dir="$1/.github/workflows"
+            local repo_dir="$1" wf_dir="$1/.github/workflows"
             mkdir -p "$wf_dir"
-            sed "s/boost-json-translation-/boost-${sub_name}-translation-/g" \
-              "$GITHUB_WORKSPACE/.github/workflows/assets/create-tag.yml" \
-              > "$wf_dir/create-tag.yml"
+            cp "$GITHUB_WORKSPACE/.github/workflows/assets/create-tag.yml" \
+              "$wf_dir/create-tag.yml"
             git -C "$repo_dir" add ".github/workflows/create-tag.yml"
             git -C "$repo_dir" commit -m "Add create-tag workflow"
           }
 
-          create_new_repo_and_push() {
-            local org="$1" sub_name="$2" sub_clone="$3" repo_url="$4" libs_ref="$5"
-            create_repo "$org" "$sub_name"
-            git -C "$sub_clone" init
-            set_git_bot_config "$sub_clone"
-            git -C "$sub_clone" add -A
-            git -C "$sub_clone" commit -m "Create the original documentation of $libs_ref"
-            git -C "$sub_clone" branch -M "$MASTER_BR"
-            git -C "$sub_clone" remote remove origin 2>/dev/null || true
-            git -C "$sub_clone" remote add origin "$repo_url"
-            git -C "$sub_clone" push -u origin "$MASTER_BR"
-            git -C "$sub_clone" push origin "$MASTER_BR"
-            git -C "$sub_clone" checkout -b "$LOCAL_BR"
-            add_create_tag_workflow "$sub_clone" "$sub_name"
-            git -C "$sub_clone" push -u origin "$LOCAL_BR"
-            set_default_branch "$org" "$sub_name" "$MASTER_BR"
+          # Create local-{lang_code} in a CppDigest lib repo from master, with create-tag.yml.
+          ensure_local_branch_in_repo() {
+            local dest_repo="$1" sub_name="$2" lang_code="$3"
+            local local_br="local-${lang_code}"
+            if git -C "$dest_repo" ls-remote --exit-code --heads origin "$local_br" &>/dev/null; then
+              echo "  Branch $local_br already exists in $sub_name." >&2
+              return 0
+            fi
+            echo "  Creating branch $local_br in $sub_name from $MASTER_BRANCH..." >&2
+            git -C "$dest_repo" fetch origin "$MASTER_BRANCH"
+            git -C "$dest_repo" checkout -B "$local_br" "origin/$MASTER_BRANCH"
+            add_create_tag_workflow "$dest_repo"
+            git -C "$dest_repo" push -u origin "$local_br"
+            echo "  Created branch $local_br." >&2
+          }
+
+          # Handle local-{lang_code} branch in a CppDigest lib repo after master is synced.
+          # Returns 0 if submodule should be added to add_or_update[lang_code], 1 otherwise.
+          process_local_branch() {
+            local dest_repo="$1" sub_name="$2" lang_code="$3"
+            local local_br="local-${lang_code}"
+            if git -C "$dest_repo" ls-remote --exit-code --heads origin "$local_br" &>/dev/null; then
+              if has_open_translation_pr "$ORG" "$sub_name" "$lang_code"; then
+                echo "  Open translation PR found for $sub_name ($local_br), skipping." >&2
+                return 1
+              fi
+              update_local_merge_from_master "$dest_repo" "$lang_code"
+            else
+              ensure_local_branch_in_repo "$dest_repo" "$sub_name" "$lang_code"
+            fi
+            return 0
           }
 
           # ── Translations repo helpers ─────────────────────────────────────────
 
+          # Create local-{lang_code} in TRANSLATIONS_REPO from master, stripping libs/ and .gitmodules.
+          ensure_local_branch_in_translations() {
+            local dir="$1" lang_code="$2"
+            local branch="local-${lang_code}"
+            if git -C "$dir" ls-remote --exit-code --heads origin "$branch" &>/dev/null; then
+              echo "  Branch $branch already exists in $TRANSLATIONS_REPO." >&2
+            else
+              echo "  Creating branch $branch in $TRANSLATIONS_REPO from $MASTER_BRANCH..." >&2
+              git -C "$dir" checkout -B "$MASTER_BRANCH" "origin/$MASTER_BRANCH"
+              git -C "$dir" checkout -b "$branch"
+              rm -rf "$dir/libs" "$dir/.gitmodules"
+              git -C "$dir" rm -rf --cached libs .gitmodules 2>/dev/null || true
+              git -C "$dir" commit -m "Init $branch" 2>/dev/null || true
+              git -C "$dir" push -u origin "$branch"
+              echo "  Created branch $branch." >&2
+            fi
+          }
+
           ensure_translations_cloned() {
             [[ -d "$3/.git" ]] && return
-            clone_repo "https://github.com/${1}/${2}.git" "$MASTER_BR" "$3" keep
+            clone_repo "https://github.com/${1}/${2}.git" "$MASTER_BRANCH" "$3" keep
             set_git_bot_config "$3"
           }
 
@@ -294,14 +323,22 @@ jobs:
             local dir="$1" libs_ref="$2"
             [[ ${#UPDATES[@]} -eq 0 ]] && return
             git -C "$dir" fetch origin 2>/dev/null || true
-            sync_translations_branch "$dir" "$MASTER_BR" "$libs_ref"
-            sync_translations_branch "$dir" "$LOCAL_BR" "$libs_ref" true
+            sync_translations_branch "$dir" "$MASTER_BRANCH" "$libs_ref"
+            for lang_code in "${lang_codes_arr[@]}"; do
+              sync_translations_branch "$dir" "local-${lang_code}" "$libs_ref" true
+            done
           }
 
           # ── Per-submodule processing ──────────────────────────────────────────
 
           process_one_submodule() {
             local sub_name="$1" doc_paths
+
+            if ! repo_exists "$ORG" "$sub_name"; then
+              echo "  Skipping: $ORG/$sub_name does not exist. Run add-submodules first." >&2
+              return 1
+            fi
+
             doc_paths=$(get_doc_paths "$sub_name" "$LIBS_REF") || {
               echo "  No libraries.json, skipping." >&2; return 1
             }
@@ -316,19 +353,40 @@ jobs:
             prune_to_doc_only "$sub_clone" "${paths_arr[@]}"
 
             local org_repo_url="https://github.com/${ORG}/${sub_name}.git"
-            if repo_exists "$ORG" "$sub_name"; then
-              local dest_repo="$ORG_WORK/$sub_name"
-              clone_repo "$org_repo_url" "$MASTER_BR" "$dest_repo" keep || {
-                echo "  clone_repo failed." >&2; return 1
-              }
-              sync_existing_repo "$dest_repo" "$sub_clone" "$LIBS_REF" "$ORG" "$sub_name"
-            else
-              create_new_repo_and_push \
-                "$ORG" "$sub_name" "$sub_clone" "$org_repo_url" "$LIBS_REF"
-            fi
+            local dest_repo="$ORG_WORK/$sub_name"
+            clone_repo "$org_repo_url" "$MASTER_BRANCH" "$dest_repo" keep || {
+              echo "  clone_repo failed." >&2; return 1
+            }
+
+            sync_repo_master "$dest_repo" "$sub_clone" "$LIBS_REF"
+
+            local any_added=0
+            for lang_code in "${lang_codes_arr[@]}"; do
+              if process_local_branch "$dest_repo" "$sub_name" "$lang_code"; then
+                if [[ -n "${add_or_update[$lang_code]:-}" ]]; then
+                  add_or_update["$lang_code"]+=" $sub_name"
+                else
+                  add_or_update["$lang_code"]="$sub_name"
+                fi
+                any_added=1
+              fi
+            done
+            [[ $any_added -eq 1 ]]
           }
 
           # ── Weblate helpers ───────────────────────────────────────────────────
+
+          # Parse "[zh_Hans, ja]" or "zh_Hans,ja" into one item per line (spaces stripped).
+          parse_list() {
+            local s="$1"
+            s="${s//[[:space:]]/}"
+            s="${s#[}"; s="${s%]}"
+            [[ -z "$s" ]] && return
+            IFS=',' read -ra parts <<< "$s"
+            for part in "${parts[@]}"; do
+              [[ -n "$part" ]] && echo "$part"
+            done
+          }
 
           # Parse "[.adoc, .md]" or '[".adoc",".md"]' into one extension per line.
           parse_extensions() {
@@ -347,19 +405,24 @@ jobs:
           }
 
           # POST to Weblate add-or-update endpoint (fire-and-forget, 5 s timeout).
+          # Payload: {organization, add_or_update: {lang_code: [subs...]}, version, extensions}
           trigger_weblate() {
-            local weblate_url="$1" weblate_token="$2" lang_code="$3" libs_ref="$4"
-            shift 4
-            local extensions=("$@")
-            [[ ${#UPDATES[@]} -eq 0 ]] && return
+            local weblate_url="$1" weblate_token="$2" libs_ref="$3" exts_json="$4"
 
-            local subs_json exts_json
-            subs_json=$(printf '%s\n' "${UPDATES[@]}" | jq -R . | jq -s .)
-            if [[ ${#extensions[@]} -gt 0 ]]; then
-              exts_json=$(printf '%s\n' "${extensions[@]}" | jq -R . | jq -s .)
-            else
-              exts_json="[]"
-            fi
+            # Build add_or_update JSON object from associative array.
+            local add_or_update_json="{}"
+            for lang_code in "${lang_codes_arr[@]}"; do
+              local subs="${add_or_update[$lang_code]:-}"
+              [[ -z "$subs" ]] && continue
+              local subs_json
+              subs_json=$(echo "$subs" | tr ' ' '\n' | grep -v '^$' | jq -R . | jq -s .)
+              add_or_update_json=$(echo "$add_or_update_json" | \
+                jq --arg lc "$lang_code" --argjson s "$subs_json" '. + {($lc): $s}')
+            done
+
+            [[ "$add_or_update_json" == "{}" ]] && {
+              echo "Weblate skipped: no submodules to update." >&2; return
+            }
 
             curl_exit=0
             curl -s -o /dev/null -m 5 -X POST \
@@ -367,9 +430,9 @@ jobs:
               -H "Content-Type: application/json" \
               -H "User-Agent: BoostDocsSync/1.0" \
               -d "$(jq -n \
-                    --arg org "$ORG" --argjson subs "$subs_json" \
-                    --arg lang "$lang_code" --arg ver "$libs_ref" --argjson exts "$exts_json" \
-                    '{organization:$org,submodules:$subs,lang_code:$lang,version:$ver,extensions:$exts}')" \
+                    --arg org "$ORG" --arg ver "$libs_ref" \
+                    --argjson add "$add_or_update_json" --argjson ext "$exts_json" \
+                    '{organization:$org,add_or_update:$add,version:$ver,extensions:$ext}')" \
               "${weblate_url%/}/boost-endpoint/add-or-update/" \
               || curl_exit=$?
             # Exit 28 = timeout; treat as success since this is fire-and-forget.
@@ -381,6 +444,16 @@ jobs:
           }
 
           # ── Main ─────────────────────────────────────────────────────────────
+
+          mapfile -t lang_codes_arr < <(parse_list "$LANG_CODES")
+          [[ ${#lang_codes_arr[@]} -eq 0 ]] && {
+            echo "Error: LANG_CODES parsed to empty list." >&2; exit 1
+          }
+          echo "Lang codes: ${lang_codes_arr[*]}" >&2
+
+          for lang_code in "${lang_codes_arr[@]}"; do
+            add_or_update["$lang_code"]=""
+          done
 
           [[ ! -f .gitmodules ]] && {
             echo "Error: .gitmodules not found (run from translations repo with master checked out)" >&2
@@ -398,36 +471,37 @@ jobs:
 
           echo "Syncing ${#submodule_names[@]} submodules from .gitmodules." >&2
 
+          # ── Step 1: ensure TRANSLATIONS_REPO has local-{lang_code} branches ──
+
+          ensure_translations_cloned "$ORG" "$TRANSLATIONS_REPO" "$TRANS_DIR"
+          for lang_code in "${lang_codes_arr[@]}"; do
+            ensure_local_branch_in_translations "$TRANS_DIR" "$lang_code"
+          done
+
+          # ── Step 2: process submodules ────────────────────────────────────────
+
           total=${#submodule_names[@]}
           for i in "${!submodule_names[@]}"; do
             sub="${submodule_names[$i]}"
             echo "[$(( i + 1 ))/$total] $sub ..." >&2
             if process_one_submodule "$sub"; then
-              ensure_translations_cloned "$ORG" "$TRANSLATIONS_REPO" "$TRANS_DIR"
               UPDATES+=("$sub")
             fi
           done
 
-          [[ -d "$TRANS_DIR/.git" ]] && finalize_translations_repo "$TRANS_DIR" "$LIBS_REF"
+          # ── Step 3: finalize TRANSLATIONS_REPO ───────────────────────────────
 
-          if [[ -n "${WEBLATE_URL:-}" && -n "${WEBLATE_TOKEN:-}" && ${#UPDATES[@]} -gt 0 ]]; then
-            any_open_pr=0
-            for sub in "${UPDATES[@]}"; do
-              has_open_translation_pr "$ORG" "$sub" && { any_open_pr=1; break; }
-            done
-            if [[ $any_open_pr -eq 0 ]]; then
-              ext_arr=()
-              [[ -n "${EXTENSIONS:-}" ]] && mapfile -t ext_arr < <(parse_extensions "$EXTENSIONS")
-              trigger_weblate "$WEBLATE_URL" "$WEBLATE_TOKEN" \
-                "$LANG_CODE" "$LIBS_REF" "${ext_arr[@]+"${ext_arr[@]}"}"
-            else
-              echo "Weblate skipped: open translation PR(s) found for one or more submodules." >&2
-            fi
-          else
-            if [[ ${#UPDATES[@]} -gt 0 ]]; then
-              echo "Weblate skipped: WEBLATE_URL or WEBLATE_TOKEN secret not set." >&2
-            fi
-          fi
+          finalize_translations_repo "$TRANS_DIR" "$LIBS_REF"
+
+          # ── Step 4: POST to Weblate ───────────────────────────────────────────
+
+          ext_arr=()
+          [[ -n "${EXTENSIONS:-}" ]] && mapfile -t ext_arr < <(parse_extensions "$EXTENSIONS")
+          exts_json="[]"
+          [[ ${#ext_arr[@]} -gt 0 ]] && \
+            exts_json=$(printf '%s\n' "${ext_arr[@]}" | jq -R . | jq -s .)
+
+          trigger_weblate "$WEBLATE_URL" "$WEBLATE_TOKEN" "$LIBS_REF" "$exts_json"
 
           echo "Done." >&2
 
