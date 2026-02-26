@@ -34,7 +34,7 @@ env:
   MASTER_BRANCH: master
 
 jobs:
-  sync-submodule:
+  start-translation:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository

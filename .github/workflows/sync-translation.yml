@@ -26,7 +26,7 @@ env:
   TRANSLATIONS_REPO: boost-docs-translation
 
 jobs:
-  sync-local-pointer:
+  sync-translation:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository (master)
