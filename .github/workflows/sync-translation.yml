@@ -35,7 +35,7 @@ jobs:
           token: ${{ secrets.SYNC_TOKEN }}
           fetch-depth: 0
 
-      - name: Update submodule pointers for all local-* branches
+      - name: Sync translation
         env:
           GITHUB_TOKEN: ${{ secrets.SYNC_TOKEN }}
         run: |

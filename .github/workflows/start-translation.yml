@@ -45,7 +45,7 @@ jobs:
       - name: Checkout master for .gitmodules
         run: git checkout ${{ env.MASTER_BRANCH }}
 
-      - name: Sync submodules
+      - name: Start translation
         shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.SYNC_TOKEN }}

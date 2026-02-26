@@ -24,7 +24,7 @@ env:
   TRANSLATIONS_REPO: boost-docs-translation
 
 jobs:
-  add-submodule:
+  add-submodules:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
