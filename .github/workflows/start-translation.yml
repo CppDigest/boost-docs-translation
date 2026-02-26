@@ -421,18 +421,28 @@ jobs:
             done
 
             [[ "$add_or_update_json" == "{}" ]] && {
-              echo "Weblate skipped: no submodules to update." >&2; return
+              echo "Weblate skipped: no translations to update." >&2; return
             }
+
+            local payload
+            payload=$(jq -n \
+              --arg org "$ORG" --arg ver "$libs_ref" \
+              --argjson add "$add_or_update_json" --argjson ext "$exts_json" \
+              '{organization:$org,add_or_update:$add,version:$ver,extensions:$ext}')
+
+            echo "Weblate trigger parameters:" >&2
+            echo "  organization: $ORG" >&2
+            echo "  version:      $libs_ref" >&2
+            echo "  extensions:   $exts_json" >&2
+            echo "  add_or_update:" >&2
+            echo "$add_or_update_json" | jq -r 'to_entries[] | "    \(.key): \(.value | join(", "))"' >&2
 
             curl_exit=0
             curl -s -o /dev/null -m 5 -X POST \
               -H "Authorization: Bearer $weblate_token" \
               -H "Content-Type: application/json" \
               -H "User-Agent: BoostDocsSync/1.0" \
-              -d "$(jq -n \
-                    --arg org "$ORG" --arg ver "$libs_ref" \
-                    --argjson add "$add_or_update_json" --argjson ext "$exts_json" \
-                    '{organization:$org,add_or_update:$add,version:$ver,extensions:$ext}')" \
+              -d "$payload" \
               "${weblate_url%/}/boost-endpoint/add-or-update/" \
               || curl_exit=$?
             # Exit 28 = timeout; treat as success since this is fire-and-forget.
