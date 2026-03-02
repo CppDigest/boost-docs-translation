@@ -6,3 +6,7 @@
 	path = libs/unordered
 	url = https://github.com/CppDigest/unordered.git
 	branch = local-zh_Hans
+[submodule "libs/beast"]
+	path = libs/beast
+	url = https://github.com/CppDigest/beast.git
+	branch = local-zh_Hans
