@@ -1,0 +1,4 @@
+[submodule "libs/beast"]
+	path = libs/beast
+	url = https://github.com/CppDigest/beast.git
+	branch = master
