@@ -79,7 +79,7 @@ jobs:
 
           BOT_NAME="Boost-Translation-CI-Bot"
           BOT_EMAIL="Boost-Translation-CI-Bot@$ORG.local"
-          BOOST_ORG="whisper67265"
+          BOOST_ORG="boostorg"
           UPDATES=()
           declare -A add_or_update
 
