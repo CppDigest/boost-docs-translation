@@ -29,7 +29,7 @@ For each Boost library submodule:
 |---|---|---|
 | `version` | no | Boost ref (e.g. `boost-1.90.0`). Defaults to `develop`. |
 | `submodules` | no | List-like string (e.g. `[algorithm, system]`). If omitted, reads from `.gitmodules`. |
-| `lang_codes` | no | Comma-separated language codes (e.g. `zh_Hans,ja`). Defaults to `secrets.LANG_CODES`. |
+| `lang_codes` | no | Comma-separated language codes (e.g. `zh_Hans,ja`). Defaults to `vars.LANG_CODES`. |
 
 ---
 
@@ -54,11 +54,8 @@ For each lang code and each submodule:
 | `client_payload` field | Required | Description |
 |---|---|---|
 | `version` | no | Boost ref (e.g. `boost-1.90.0`). Defaults to `develop`. |
-| `lang_codes` | no | Comma-separated language codes (e.g. `zh_Hans,ja`). Defaults to `secrets.LANG_CODES`. |
+| `lang_codes` | no | Comma-separated language codes (e.g. `zh_Hans,ja`). Defaults to `vars.LANG_CODES`. |
 | `extensions` | no | File extensions for Weblate (e.g. `[.adoc, .md]`). Default: empty (all supported). |
-
-> **Note:** `lang_codes` values sourced from `secrets.LANG_CODES` will appear as `***` in
-> workflow logs due to GitHub Actions secret masking. The Weblate payload is unaffected.
 
 ---
 
@@ -85,8 +82,8 @@ No `client_payload` fields.
 A workflow template copied into each CppDigest lib repo by `add-submodules.yml` and
 `start-translation.yml`. Triggers when a Weblate translation PR
 (`translation-{lang_code}-{version}` → `local-{lang_code}`) is merged, and creates a
-versioned tag of the form `boost-{version}-{lang_code}-{repo}-translation`
-(e.g. `boost-1.89.0-zh_Hans-algorithm-translation`). Skipped if the tag already exists.
+versioned tag of the form `{version}-{repo}-{lang_code}`
+(e.g. `boost-1.90.0-algorithm-zh_Hans`). Skipped if the tag already exists.
 
 See [`assets/README.md`](.github/workflows/assets/README.md) for details.
 
@@ -97,8 +94,13 @@ See [`assets/README.md`](.github/workflows/assets/README.md) for details.
 | Secret | Used by | Description |
 |---|---|---|
 | `SYNC_TOKEN` | all workflows | PAT with `repo` scope (and org repo-create permission for `add-submodules`). |
-| `LANG_CODES` | `add-submodules`, `start-translation` | Optional. Default comma-separated language codes (e.g. `zh_Hans,ja`). |
 | `WEBLATE_URL` | `start-translation` | Weblate instance URL. |
 | `WEBLATE_TOKEN` | `start-translation` | Weblate API token. |
+
+## Repository variables
+
+| Variable | Used by | Description |
+|---|---|---|
+| `LANG_CODES` | `add-submodules`, `start-translation` | Optional. Default comma-separated language codes (e.g. `zh_Hans,ja`). |
 
 ---

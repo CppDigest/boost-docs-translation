@@ -17,23 +17,23 @@ branch must start with `translation-` (Weblate-created branches).
 
 1. Extracts `lang_code` from the base branch: `local-zh_Hans` → `zh_Hans`.
 2. Extracts `version` from the head branch:
-   `translation-zh_Hans-boost-1.89.0` → strips `translation-zh_Hans-boost-` → `1.89.0`.
-3. Builds the tag name: `boost-{version}-{lang_code}-{repo}-translation`
-   (e.g. `boost-1.89.0-zh_Hans-algorithm-translation`).
+   `translation-zh_Hans-boost-1.90.0` → strips `translation-zh_Hans-` → `boost-1.90.0`.
+3. Builds the tag name: `{version}-{repo}-{lang_code}`
+   (e.g. `boost-1.90.0-algorithm-zh_Hans`).
 4. Checks out the `local-{lang_code}` branch with full tag history.
 5. Creates and pushes the tag. Skips silently if the tag already exists.
 
 **Tag format:**
 
 ```
-boost-{version}-{lang_code}-{repo}-translation
+{version}-{repo}-{lang_code}
 ```
 
 | Component | Source | Example |
 |---|---|---|
-| `version` | Head branch (`translation-zh_Hans-boost-1.89.0`) | `1.89.0` |
-| `lang_code` | Base branch (`local-zh_Hans`) | `zh_Hans` |
+| `version` | Head branch (`translation-zh_Hans-boost-1.90.0`) | `boost-1.90.0` |
 | `repo` | `github.event.repository.name` | `algorithm` |
+| `lang_code` | Base branch (`local-zh_Hans`) | `zh_Hans` |
 
 **How it gets installed:**
 

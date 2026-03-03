@@ -21,10 +21,6 @@ on:
   schedule:
     - cron: "0 0 * * *"
 
-env:
-  ORG: CppDigest
-  TRANSLATIONS_REPO: boost-docs-translation
-
 jobs:
   sync-translation:
     runs-on: ubuntu-latest
@@ -43,8 +39,11 @@ jobs:
 
           gh auth setup-git
 
-          git config user.name "Boost-Translation-CI-Bot"
-          git config user.email "Boost-Translation-CI-Bot@${ORG}.local"
+          # shellcheck source=assets/env.sh
+          source "$GITHUB_WORKSPACE/.github/workflows/assets/env.sh"
+
+          git config user.name "$BOT_NAME"
+          git config user.email "$BOT_EMAIL"
 
           # Discover all remote local-* branches.
           mapfile -t local_branches < <(

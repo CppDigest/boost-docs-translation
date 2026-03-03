@@ -1,5 +1,5 @@
 # Create a versioned tag when a PR from translation-{lang_code}-{version} into local-{lang_code} is merged.
-# Tag format: {version}-{lang_code}-{repo}-translation (e.g. boost-1.89.0-zh_Hans-algorithm-translation).
+# Tag format: {version}-{repo}-{lang_code} (e.g. boost-1.90.0-algorithm-zh_Hans).
 # Skipped if the tag already exists.
 # Workflow must exist on the default branch (master).
 
@@ -28,12 +28,11 @@ jobs:
           # lang_code from base branch: local-zh_Hans -> zh_Hans
           LANG_CODE="${BASE_REF#local-}"
 
-          # version from head branch: translation-zh_Hans-boost-1.89.0 -> strip "translation-${LANG_CODE}-boost-" -> 1.89.0
-          VERSION_FULL="${HEAD_REF#translation-${LANG_CODE}-}"
-          VERSION="${VERSION_FULL#boost-}"
+          # version from head branch: translation-zh_Hans-boost-1.90.0 -> strip "translation-${LANG_CODE}-" -> boost-1.90.0
+          VERSION="${HEAD_REF#translation-${LANG_CODE}-}"
 
-          # e.g. boost-1.89.0-zh_Hans-algorithm-translation
-          TAGNAME="boost-${VERSION}-${LANG_CODE}-${REPO}-translation"
+          # e.g. boost-1.90.0-algorithm-zh_Hans
+          TAGNAME="${VERSION}-${REPO}-${LANG_CODE}"
           echo "tagname=$TAGNAME" >> "$GITHUB_OUTPUT"
 
       - name: Checkout local-{lang_code} branch with tags
