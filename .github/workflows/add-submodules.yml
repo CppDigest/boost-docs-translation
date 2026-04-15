@@ -1,0 +1,180 @@
+# Add new Boost Submodules from boostorg/boost to organization.
+#
+# Trigger: repository_dispatch with event_type "add-submodules".
+# Example: POST /repos/{owner}/{repo}/dispatches
+#   Body: {"event_type": "add-submodules", "client_payload": {"version": "boost-1.90.0"}}
+#
+# client_payload:
+#   version: (optional) Boost release ref (e.g. boost-1.90.0). Used for both library repos and .gitmodules
+#     auto-discovery. If omitted: library repos use develop, .gitmodules uses develop.
+#   submodules: (optional) List-like string of submodule names (e.g. [algorithm, system]). If set, .gitmodules is not fetched.
+#   lang_codes: (optional) Language code for Weblate (e.g. zh_Hans). Defaults to vars.LANG_CODES.
+#
+# Required secret: SYNC_TOKEN — PAT with repo (and org repo create) permissions for organization.
+# Optional secrets: LANG_CODES.
+
+name: Add submodules
+
+on:
+  repository_dispatch:
+    types: [add-submodules]
+
+jobs:
+  add-submodules:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.SYNC_TOKEN }}
+
+      - name: Add submodules
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.SYNC_TOKEN }}
+          LIBS_REF: ${{ github.event.client_payload.version || 'develop' }}
+          SUBMODULES: ${{ github.event.client_payload.submodules || '' }}
+          LANG_CODES: ${{ github.event.client_payload.lang_codes || vars.LANG_CODES }}
+        run: |
+          set -euo pipefail
+
+          [[ -z "${GITHUB_TOKEN:-}" ]] && {
+            echo "Error: SYNC_TOKEN secret is not set." >&2
+            exit 1
+          }
+
+          [[ -z "${LANG_CODES:-}" ]] && {
+            echo "Error: lang_codes not set in client_payload or vars.LANG_CODES." >&2
+            exit 1
+          }
+
+          UPDATES=()
+
+          WORK_DIR=$(mktemp -d)
+          trap 'rm -rf "$WORK_DIR"' EXIT
+          BOOST_WORK="$WORK_DIR/boost"
+          TRANS_DIR="$WORK_DIR/translations"
+          mkdir -p "$BOOST_WORK"
+
+          # Configure git credential helper so all github.com pushes are authenticated
+          # without embedding tokens in remote URLs.
+          gh auth setup-git
+
+          # shellcheck source=assets/env.sh
+          source "$GITHUB_WORKSPACE/.github/workflows/assets/env.sh"
+          # shellcheck source=assets/lib.sh
+          source "$GITHUB_WORKSPACE/.github/workflows/assets/lib.sh"
+
+          # ── Organization repo helpers ────────────────────────────────────────
+
+          create_repo() {
+            gh repo create "$1/$2" --public > /dev/null \
+              || { echo "Create repo $1/$2 failed" >&2; return 1; }
+          }
+
+          set_default_branch() {
+            gh api --method PATCH "repos/$1/$2" -f "default_branch=$3" \
+              || echo "Warning: set default branch to $3 failed." >&2
+          }
+
+          create_new_repo_and_push() {
+            local org="$1" sub_name="$2" sub_clone="$3" repo_url="$4" libs_ref="$5"
+            create_repo "$org" "$sub_name"
+            git -C "$sub_clone" init
+            set_git_bot_config "$sub_clone"
+            git -C "$sub_clone" add -A
+            git -C "$sub_clone" commit -m "Create the original documentation of $libs_ref"
+            git -C "$sub_clone" branch -M "$MASTER_BRANCH"
+            git -C "$sub_clone" remote remove origin 2>/dev/null || true
+            git -C "$sub_clone" remote add origin "$repo_url"
+            git -C "$sub_clone" push -u origin "$MASTER_BRANCH"
+            git -C "$sub_clone" push origin "$MASTER_BRANCH"
+            for lang_code in "${lang_codes_arr[@]}"; do
+              local local_br="local-${lang_code}"
+              git -C "$sub_clone" checkout -B "$local_br" "$MASTER_BRANCH"
+              add_create_tag_workflow "$sub_clone"
+              git -C "$sub_clone" push -u origin "$local_br"
+            done
+            set_default_branch "$org" "$sub_name" "$MASTER_BRANCH"
+          }
+
+          # ── Per-submodule processing ──────────────────────────────────────────
+
+          process_one_submodule() {
+            local sub_name="$1" doc_paths
+
+            if repo_exists "$ORG" "$sub_name"; then
+              echo "  Skipping: $ORG/$sub_name already exists." >&2; return 1
+            fi
+
+            doc_paths=$(get_doc_paths "$sub_name" "$LIBS_REF") || {
+              echo "  No libraries.json, skipping." >&2; return 1
+            }
+            [[ -z "$doc_paths" ]] && { echo "  No doc paths, skipping." >&2; return 1; }
+
+            local sub_clone="$BOOST_WORK/$sub_name"
+            clone_repo "https://github.com/${BOOST_ORG}/${sub_name}.git" \
+              "$LIBS_REF" "$sub_clone" || { echo "  Clone failed." >&2; return 1; }
+
+            local -a paths_arr
+            mapfile -t paths_arr <<< "$doc_paths"
+            prune_to_doc_only "$sub_clone" "${paths_arr[@]}"
+
+            local org_repo_url="https://github.com/${ORG}/${sub_name}.git"
+            create_new_repo_and_push "$ORG" "$sub_name" "$sub_clone" "$org_repo_url" "$LIBS_REF"
+          }
+
+          # ── Main ─────────────────────────────────────────────────────────────
+
+          mapfile -t lang_codes_arr < <(parse_list "$LANG_CODES")
+          [[ ${#lang_codes_arr[@]} -eq 0 ]] && {
+            echo "Error: LANG_CODES parsed to empty list." >&2; exit 1
+          }
+          echo "Lang codes: ${lang_codes_arr[*]}" >&2
+
+          # ── Step 1: ensure TRANSLATIONS_REPO has local-{lang_code} branches ──
+
+          ensure_translations_cloned "$ORG" "$TRANSLATIONS_REPO" "$TRANS_DIR"
+          for lang_code in "${lang_codes_arr[@]}"; do
+            ensure_local_branch_in_translations "$TRANS_DIR" "$lang_code"
+          done
+
+          # ── Step 2: process submodules ────────────────────────────────────────
+
+          if [[ -n "${SUBMODULES:-}" ]]; then
+            mapfile -t submodule_names < <(parse_list "$SUBMODULES")
+            echo "Using ${#submodule_names[@]} submodules from input." >&2
+          else
+            # Fetch .gitmodules from boostorg/boost at LIBS_REF to discover all libs/ submodules.
+            echo "Fetching .gitmodules from boostorg/boost at $LIBS_REF..." >&2
+            gitmodules_content=$(gh api \
+              "repos/boostorg/boost/contents/.gitmodules?ref=$LIBS_REF" \
+              -H "Accept: application/vnd.github.v3.raw" 2>/dev/null) || {
+              echo "Failed to fetch .gitmodules" >&2; exit 1
+            }
+            mapfile -t submodule_names < <(
+              echo "$gitmodules_content" \
+                | grep '^\s*path\s*=' \
+                | sed 's/.*=\s*//' \
+                | { grep '^libs/' || true; } \
+                | sed 's|^libs/||'
+            )
+            echo "Found ${#submodule_names[@]} libs submodules." >&2
+          fi
+
+          [[ ${#submodule_names[@]} -eq 0 ]] && {
+            echo "No submodules to process, nothing to do." >&2; exit 0
+          }
+
+          total=${#submodule_names[@]}
+          for i in "${!submodule_names[@]}"; do
+            sub="${submodule_names[$i]}"
+            echo "[$(( i + 1 ))/$total] $sub ..." >&2
+            if process_one_submodule "$sub"; then
+              UPDATES+=("$sub")
+            fi
+          done
+
+          finalize_translations_repo "$TRANS_DIR" "$LIBS_REF"
+
+          echo "Done." >&2

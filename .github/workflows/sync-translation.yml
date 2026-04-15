@@ -1,0 +1,92 @@
+# Sync submodule pointers on all "local-*" branches to the tip of each submodule's
+# corresponding "local-*" branch.
+#
+# Discovers all remote "local-*" branches in TRANSLATIONS_REPO, then for each one:
+# checks it out with submodules, advances every submodule pointer to that branch's
+# tip in the submodule repo, commits, and force-pushes.
+#
+# Workflow lives on master (default). Trigger: repository_dispatch (event_type
+# "sync-translation") or schedule (every day).
+#
+# Manual trigger: POST /repos/{owner}/{repo}/dispatches
+#   Body: {"event_type": "sync-translation"}
+#
+# Required secret: SYNC_TOKEN — PAT with repo push permission for ORG/TRANSLATIONS_REPO.
+
+name: Sync translation
+
+on:
+  repository_dispatch:
+    types: [sync-translation]
+  schedule:
+    - cron: "0 0 * * *"
+
+jobs:
+  sync-translation:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository (master)
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.SYNC_TOKEN }}
+          fetch-depth: 0
+
+      - name: Sync translation
+        env:
+          GITHUB_TOKEN: ${{ secrets.SYNC_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          gh auth setup-git
+
+          # shellcheck source=assets/env.sh
+          source "$GITHUB_WORKSPACE/.github/workflows/assets/env.sh"
+
+          git config user.name "$BOT_NAME"
+          git config user.email "$BOT_EMAIL"
+
+          # Discover all remote local-* branches.
+          mapfile -t local_branches < <(
+            git ls-remote --heads origin 'refs/heads/local-*' \
+              | awk '{print $2}' | sed 's|refs/heads/||'
+          )
+
+          [[ ${#local_branches[@]} -eq 0 ]] && {
+            echo "No local-* branches found, nothing to do." >&2; exit 0
+          }
+
+          echo "Found ${#local_branches[@]} local-* branch(es): ${local_branches[*]}" >&2
+
+          for branch in "${local_branches[@]}"; do
+            echo "── $branch ──────────────────────────────────────" >&2
+            git fetch origin "$branch"
+            git checkout -B "$branch" "origin/$branch"
+            git submodule update --init 2>/dev/null || true
+
+            updated=0
+            while IFS= read -r sub_path; do
+              [[ -z "$sub_path" ]] && continue
+              [[ ! -d "$sub_path" ]] && continue
+              git config "submodule.${sub_path}.branch" "$branch"
+              git -C "$sub_path" fetch origin \
+                "refs/heads/${branch}:refs/remotes/origin/${branch}" 2>/dev/null || true
+              if ! git submodule update --remote "$sub_path"; then
+                echo "  Skipping $sub_path: update --remote failed (no branch $branch?)" >&2
+                continue
+              fi
+              git add "$sub_path"
+              echo "  Updated $sub_path -> $(git -C "$sub_path" rev-parse --short HEAD)" >&2
+              updated=1
+            done < <(git config -f .gitmodules --get-regexp 'submodule\..*\.path' \
+                       2>/dev/null | sed 's/^[^ ]* //')
+
+            if [[ $updated -eq 1 ]] && ! git diff --staged --quiet; then
+              git commit -m "Update libs submodules ($branch)"
+              git push --force origin "HEAD:$branch"
+              echo "  Pushed to origin/$branch" >&2
+            else
+              echo "  No pointer changes for $branch." >&2
+            fi
+          done
+
+          echo "Done." >&2
