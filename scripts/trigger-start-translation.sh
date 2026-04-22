@@ -6,7 +6,7 @@
 #
 # Usage:
 #   scripts/trigger-start-translation.sh [--repo OWNER/NAME] [--token PAT] \
-#     [--version REF] [--lang-codes zh_Hans,ja] [--extensions '[.adoc, .md]']
+#     [--version REF] [--lang-codes zh_Hans,ja] [--extensions '.adoc, .qbk']
 #
 # If --repo is omitted: GITHUB_REPOSITORY, then DEFAULT_REPO below, then git origin.
 #
@@ -25,10 +25,12 @@ fi
 unset _REPO_ROOT
 
 # ---------------------------------------------------------------------------
-# Typical run — edit DEFAULT_REPO. CLI flags override.
-# Omit version/lang_codes/extensions in payload when unset → workflow defaults.
+# Typical run — edit defaults below. CLI flags override.
+# Omit version/lang_codes in payload when unset → workflow defaults.
+# Extensions default to .adoc and .qbk; set DEFAULT_EXTENSIONS="" to omit from payload.
 # ---------------------------------------------------------------------------
 DEFAULT_REPO="CppDigest/boost-docs-translation"
+DEFAULT_EXTENSIONS=".adoc, .qbk"
 
 usage() {
   cat <<'EOF'
@@ -36,7 +38,7 @@ Trigger start-translation.yml via repository_dispatch (POST .../dispatches).
 
 Usage:
   scripts/trigger-start-translation.sh [--repo OWNER/NAME] [--token PAT] \
-    [--version REF] [--lang-codes zh_Hans,ja] [--extensions '[.adoc, .md]']
+    [--version REF] [--lang-codes zh_Hans,ja] [--extensions '.adoc, .qbk']
 
 Requires: curl; jq or Python 3 (python3 / python)
 Auth: .env (GH_TOKEN), GH_TOKEN / GITHUB_TOKEN in env, or --token (needs repo scope on the target).
@@ -46,7 +48,7 @@ Options:
   --token PAT           GitHub token
   --version REF       optional; omit → workflow uses develop
   --lang-codes CSV    optional; omit → workflow uses repo vars.LANG_CODES
-  --extensions LIST   optional; e.g. "[.adoc, .md]" or ".adoc,.md"; omit → workflow default empty
+  --extensions LIST   default DEFAULT_EXTENSIONS (.adoc, .qbk); clear default in script to omit
 EOF
 }
 
@@ -145,6 +147,8 @@ if [[ -z "$REPO" ]]; then
     exit 1
   }
 fi
+
+EXTENSIONS="${EXTENSIONS:-$DEFAULT_EXTENSIONS}"
 
 body="$(dispatch_json "$VERSION" "$LANG_CODES" "$EXTENSIONS")" || {
   echo "error: install jq, or Python 3 (python3 or python on PATH), to build the request JSON" >&2
