@@ -1,0 +1,11 @@
+# Env (secrets)
+.env
+
+# Cursor files
+.cursor/
+
+# Data files
+data/
+
+# Local test scripts
+test/
