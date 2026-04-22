@@ -26,10 +26,12 @@ unset _REPO_ROOT
 
 # ---------------------------------------------------------------------------
 # Typical run — edit defaults below. CLI flags override.
-# Omit version/lang_codes in payload when unset → workflow defaults.
+# Omit lang_codes in payload when unset → workflow vars.LANG_CODES.
+# Set DEFAULT_VERSION="" to omit version from payload → workflow uses develop.
 # Extensions default to .adoc and .qbk; set DEFAULT_EXTENSIONS="" to omit from payload.
 # ---------------------------------------------------------------------------
 DEFAULT_REPO="CppDigest/boost-docs-translation"
+DEFAULT_VERSION="boost-1.90.0"
 DEFAULT_EXTENSIONS=".adoc, .qbk"
 
 usage() {
@@ -46,7 +48,7 @@ Auth: .env (GH_TOKEN), GH_TOKEN / GITHUB_TOKEN in env, or --token (needs repo sc
 Options:
   --repo OWNER/REPO     Target repository (default: GITHUB_REPOSITORY, then DEFAULT_REPO, then origin)
   --token PAT           GitHub token
-  --version REF       optional; omit → workflow uses develop
+  --version REF       Boost ref; default DEFAULT_VERSION in script (clear default to omit → develop)
   --lang-codes CSV    optional; omit → workflow uses repo vars.LANG_CODES
   --extensions LIST   default DEFAULT_EXTENSIONS (.adoc, .qbk); clear default in script to omit
 EOF
@@ -148,6 +150,7 @@ if [[ -z "$REPO" ]]; then
   }
 fi
 
+VERSION="${VERSION:-$DEFAULT_VERSION}"
 EXTENSIONS="${EXTENSIONS:-$DEFAULT_EXTENSIONS}"
 
 body="$(dispatch_json "$VERSION" "$LANG_CODES" "$EXTENSIONS")" || {
