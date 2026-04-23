@@ -1,4 +1,4 @@
-# Add new Boost Submodules from boostorg/boost to organization.
+# Add new Boost Submodules from boostorg/boost to the per-library GitHub org.
 #
 # Trigger: repository_dispatch with event_type "add-submodules".
 # Example: POST /repos/{owner}/{repo}/dispatches
@@ -10,8 +10,9 @@
 #   submodules: (optional) List-like string of submodule names (e.g. [algorithm, system]). If set, .gitmodules is not fetched.
 #   lang_codes: (optional) Language code for Weblate (e.g. zh_Hans). Defaults to vars.LANG_CODES.
 #
-# Required secret: SYNC_TOKEN — PAT with repo (and org repo create) permissions for organization.
-# Optional secrets: LANG_CODES.
+# Required secret: SYNC_TOKEN — PAT with repo and org create/push in MODULE_ORG.
+#   Repository variable SUBMODULES_ORG: GitHub org for library repos (e.g. CppDigest). If unset, MODULE_ORG is this repo's org.
+# Optional: LANG_CODES.
 
 name: Add submodules
 
@@ -35,6 +36,7 @@ jobs:
           LIBS_REF: ${{ github.event.client_payload.version || 'develop' }}
           SUBMODULES: ${{ github.event.client_payload.submodules || '' }}
           LANG_CODES: ${{ github.event.client_payload.lang_codes || vars.LANG_CODES }}
+          SUBMODULES_ORG: ${{ vars.SUBMODULES_ORG }}
         run: |
           set -euo pipefail
 
@@ -103,8 +105,8 @@ jobs:
           process_one_submodule() {
             local sub_name="$1" doc_paths
 
-            if repo_exists "$ORG" "$sub_name"; then
-              echo "  Skipping: $ORG/$sub_name already exists." >&2; return 1
+            if repo_exists "$MODULE_ORG" "$sub_name"; then
+              echo "  Skipping: $MODULE_ORG/$sub_name already exists." >&2; return 1
             fi
 
             doc_paths=$(get_doc_paths "$sub_name" "$LIBS_REF") || {
@@ -120,8 +122,8 @@ jobs:
             mapfile -t paths_arr <<< "$doc_paths"
             prune_to_doc_only "$sub_clone" "${paths_arr[@]}"
 
-            local org_repo_url="https://github.com/${ORG}/${sub_name}.git"
-            create_new_repo_and_push "$ORG" "$sub_name" "$sub_clone" "$org_repo_url" "$LIBS_REF"
+            local org_repo_url="https://github.com/${MODULE_ORG}/${sub_name}.git"
+            create_new_repo_and_push "$MODULE_ORG" "$sub_name" "$sub_clone" "$org_repo_url" "$LIBS_REF"
           }
 
           # ── Main ─────────────────────────────────────────────────────────────

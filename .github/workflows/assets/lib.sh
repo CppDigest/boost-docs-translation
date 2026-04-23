@@ -1,5 +1,5 @@
 # Shared shell library for add-submodules and start-translation workflows.
-# Source this file after setting: ORG, BOT_NAME, BOT_EMAIL, BOOST_ORG, MASTER_BRANCH,
+# Source this file after setting: ORG, MODULE_ORG, BOT_NAME, BOT_EMAIL, BOOST_ORG, MASTER_BRANCH,
 # TRANSLATIONS_REPO, TRANS_DIR, GITHUB_WORKSPACE, UPDATES (array).
 
 # ── Helpers ──────────────────────────────────────────────────────────
@@ -156,7 +156,7 @@ sync_translations_branch() {
   local dir="$1" branch="$2" libs_ref="$3" force="${4:-false}"
   git -C "$dir" checkout -B "$branch" "origin/$branch"
   for sub in "${UPDATES[@]}"; do
-    update_translations_submodule "$dir" "$ORG" "$sub" "$branch"
+    update_translations_submodule "$dir" "$MODULE_ORG" "$sub" "$branch"
   done
   commit_and_push_translations_branch "$dir" "$branch" "$libs_ref" "$force"
 }
