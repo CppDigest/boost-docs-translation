@@ -4,7 +4,7 @@
 # Example: POST /repos/{owner}/{repo}/dispatches
 #   Body: {"event_type": "start-translation", "client_payload": {"version": "boost-1.90.0"}}
 #
-# Submodules list is taken from .gitmodules of ORG/TRANSLATIONS_REPO at master branch
+# Submodules list is taken from .gitmodules of this repository at master
 # (only libs/ entries). No new org repos are created; run add-submodules first.
 #
 # For each lang_code in LANG_CODES:
@@ -20,7 +20,9 @@
 #   extensions: (optional) File extensions for Weblate (e.g. [.adoc, .md]). Default empty.
 #
 # Required secrets: SYNC_TOKEN, WEBLATE_URL, WEBLATE_TOKEN.
-# Optional secret: LANG_CODES (used when lang_codes not in client_payload).
+#   SYNC_TOKEN: push/PR access in MODULE_ORG. Repository variable SUBMODULES_ORG: org for
+#   library repos (e.g. CppDigest). If unset, MODULE_ORG is this repo's org.
+# Optional: LANG_CODES (used when lang_codes not in client_payload).
 
 name: Start translation
 
@@ -49,6 +51,7 @@ jobs:
           EXTENSIONS: ${{ github.event.client_payload.extensions || '' }}
           WEBLATE_URL: ${{ secrets.WEBLATE_URL }}
           WEBLATE_TOKEN: ${{ secrets.WEBLATE_TOKEN }}
+          SUBMODULES_ORG: ${{ vars.SUBMODULES_ORG }}
         run: |
           set -euo pipefail
 
@@ -90,7 +93,7 @@ jobs:
           # shellcheck source=assets/lib.sh
           source "$GITHUB_WORKSPACE/.github/workflows/assets/lib.sh"
 
-          ORG_WORK="$WORK_DIR/$ORG"
+          ORG_WORK="$WORK_DIR/$MODULE_ORG"
           mkdir -p "$ORG_WORK"
 
           # ── GitHub API helpers (via gh CLI) ──────────────────────────────────
@@ -151,7 +154,7 @@ jobs:
             local dest_repo="$1" sub_name="$2" lang_code="$3"
             local local_br="local-${lang_code}"
             if git -C "$dest_repo" ls-remote --exit-code --heads origin "$local_br" &>/dev/null; then
-              if has_open_translation_pr "$ORG" "$sub_name" "$lang_code"; then
+              if has_open_translation_pr "$MODULE_ORG" "$sub_name" "$lang_code"; then
                 echo "  Open translation PR found for $sub_name ($local_br), skipping." >&2
                 return 1
               fi
@@ -167,8 +170,8 @@ jobs:
           process_one_submodule() {
             local sub_name="$1" doc_paths
 
-            if ! repo_exists "$ORG" "$sub_name"; then
-              echo "  Skipping: $ORG/$sub_name does not exist. Run add-submodules first." >&2
+            if ! repo_exists "$MODULE_ORG" "$sub_name"; then
+              echo "  Skipping: $MODULE_ORG/$sub_name does not exist. Run add-submodules first." >&2
               return 1
             fi
 
@@ -185,7 +188,7 @@ jobs:
             mapfile -t paths_arr <<< "$doc_paths"
             prune_to_doc_only "$sub_clone" "${paths_arr[@]}"
 
-            local org_repo_url="https://github.com/${ORG}/${sub_name}.git"
+            local org_repo_url="https://github.com/${MODULE_ORG}/${sub_name}.git"
             local dest_repo="$ORG_WORK/$sub_name"
             clone_repo "$org_repo_url" "$MASTER_BRANCH" "$dest_repo" keep || {
               echo "  clone_repo failed." >&2; return 1
@@ -247,12 +250,12 @@ jobs:
 
             local payload
             payload=$(jq -n \
-              --arg org "$ORG" --arg ver "$libs_ref" \
+              --arg org "$MODULE_ORG" --arg ver "$libs_ref" \
               --argjson add "$add_or_update_json" --argjson ext "$exts_json" \
               '{organization:$org,add_or_update:$add,version:$ver,extensions:$ext}')
 
             echo "Weblate trigger parameters:" >&2
-            echo "  organization: $ORG" >&2
+            echo "  organization: $MODULE_ORG" >&2
             echo "  version:      $libs_ref" >&2
             echo "  extensions:   $exts_json" >&2
             echo "  add_or_update:" >&2

@@ -11,7 +11,8 @@
 # Manual trigger: POST /repos/{owner}/{repo}/dispatches
 #   Body: {"event_type": "sync-translation"}
 #
-# Required secret: SYNC_TOKEN — PAT with repo push permission for ORG/TRANSLATIONS_REPO.
+# Required secret: SYNC_TOKEN — PAT with repo push to this repository.
+#   Submodule remotes in .gitmodules point at per-library org (set when running add-submodules / start-translation with SUBMODULES_ORG).
 
 name: Sync translation
 
