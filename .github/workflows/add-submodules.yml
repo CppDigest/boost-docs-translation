@@ -116,7 +116,7 @@ jobs:
 
             local sub_clone="$BOOST_WORK/$sub_name"
             clone_repo "https://github.com/${BOOST_ORG}/${sub_name}.git" \
-              "$LIBS_REF" "$sub_clone" || { echo "  Clone failed." >&2; return 1; }
+              "$LIBS_REF" "$sub_clone" || { echo "  Clone failed." >&2; return 2; }
 
             local -a paths_arr
             mapfile -t paths_arr <<< "$doc_paths"
@@ -169,13 +169,22 @@ jobs:
           }
 
           total=${#submodule_names[@]}
+          submodule_fatal=0
           for i in "${!submodule_names[@]}"; do
             sub="${submodule_names[$i]}"
             echo "[$(( i + 1 ))/$total] $sub ..." >&2
-            if process_one_submodule "$sub"; then
+            process_one_submodule "$sub"
+            rc=$?
+            if [[ $rc -eq 0 ]]; then
               UPDATES+=("$sub")
+            elif [[ $rc -eq 2 ]]; then
+              submodule_fatal=$((submodule_fatal + 1))
             fi
           done
+          [[ $submodule_fatal -gt 0 ]] && {
+            echo "Error: $submodule_fatal submodule(s) failed with errors." >&2
+            exit 1
+          }
 
           finalize_translations_repo "$TRANS_DIR" "$LIBS_REF"
 
