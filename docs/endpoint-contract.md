@@ -2,7 +2,7 @@
 
 **Status:** first-pass operator doc. Per-surface labels: **documented** (caller + server checked), **partial** (caller only or server only), **unknown** (not verified here).
 
-**Repos:** caller = this repo (`boost-docs-translation`); Weblate server = [`cppalliance/weblate`](https://github.com/cppalliance/weblate) (`weblate.boost_endpoint` app).
+**Repos:** caller = this repo (`boost-docs-translation`); Weblate server implementation = [`cppalliance/weblate`](https://github.com/cppalliance/weblate) (`weblate.boost_endpoint` Django app). Anyone can verify the server sections against that public repository; file paths below are relative to its root.
 
 ## Overview and system boundary
 
@@ -47,7 +47,7 @@ flowchart LR
 | 3 | Weblate `boost_endpoint` | `POST` | `{WEBLATE_URL}/boost-endpoint/add-or-update/` | `.github/workflows/start-translation.yml` (`trigger_weblate`) | **documented** |
 | 4 | Weblate `boost_endpoint` | `GET` | `{WEBLATE_URL}/boost-endpoint/` | *Not called by this repo* | **partial** (server only) |
 
-`WEBLATE_URL` is a repository secret; the workflow strips a trailing slash before appending `/boost-endpoint/add-or-update/`.
+`WEBLATE_URL` is a repository secret; the workflow strips a trailing slash before appending `/boost-endpoint/add-or-update/`. It must be the **HTTP origin** your instance uses for the UI/API (scheme + host + optional port). If the deployment serves Weblate under a path prefix (`settings.URL_PREFIX` in `weblate/urls.py`), include that prefix in `WEBLATE_URL` so resolved paths match the running site.
 
 ---
 
@@ -119,11 +119,11 @@ If `add_or_update` would serialize to `{}` (no submodules produced updates for a
 
 ### Server contract (`cppalliance/weblate`)
 
-Validated against `cppalliance/weblate` @ default branch (paths under `weblate/boost_endpoint/`):
+The following matches the published [`cppalliance/weblate`](https://github.com/cppalliance/weblate) sources (`weblate.boost_endpoint`). Paths in the table are relative to that repository’s root (browse on GitHub or clone locally):
 
 | Item | Value |
 |------|--------|
-| Mount | `path("boost-endpoint/", include("weblate.boost_endpoint.urls"))` when `weblate.boost_endpoint` is in `INSTALLED_APPS` (`weblate/urls.py`). |
+| Mount | `path("boost-endpoint/", include("weblate.boost_endpoint.urls"))` when `weblate.boost_endpoint` is in `INSTALLED_APPS` (`weblate/urls.py`, appended to `real_patterns`). |
 | POST route | `add-or-update/` → `AddOrUpdateView` |
 | Auth | `IsAuthenticated` (DRF). Token style used by caller matches typical Weblate/API token usage. |
 | Request schema | `AddOrUpdateRequestSerializer`: `organization` (required string), `add_or_update` (required dict, **non-empty**, values are lists of strings), `version` (required string), `extensions` (optional list of strings or null). |
@@ -137,7 +137,7 @@ Validated against `cppalliance/weblate` @ default branch (paths under `weblate/b
 
 ## 3. Weblate `GET …/boost-endpoint/` (informational)
 
-**Server:** `BoostEndpointInfo` — returns JSON such as `module`, `description`.
+**Server:** `BoostEndpointInfo` — returns JSON `{"module":"boost-endpoint","description":"Boost documentation translation API"}` (fixed strings in `views.py`).
 
 **This repo:** No workflow or script calls this endpoint today. Useful for manual health checks with the same token as the POST.
 
@@ -183,5 +183,6 @@ Validated against `cppalliance/weblate` @ default branch (paths under `weblate/b
 |--------|-------------------------------|
 | Mount | `weblate/urls.py` (`boost-endpoint/`) |
 | Routes | `weblate/boost_endpoint/urls.py` |
-| POST handler | `weblate/boost_endpoint/views.py` (`AddOrUpdateView`) |
+| POST handler | `weblate/boost_endpoint/views.py` (`AddOrUpdateView`, `BoostEndpointInfo`) |
 | Request validation | `weblate/boost_endpoint/serializers.py` |
+| Component logic | `weblate/boost_endpoint/services.py` (`BoostComponentService.process_all`) |
