@@ -321,12 +321,11 @@ jobs:
           for i in "${!submodule_names[@]}"; do
             sub="${submodule_names[$i]}"
             echo "[$(( i + 1 ))/$total] $sub ..." >&2
-            process_one_submodule "$sub"
-            rc=$?
-            if [[ $rc -eq 0 ]]; then
+            if process_one_submodule "$sub"; then
               UPDATES+=("$sub")
-            elif [[ $rc -eq 2 ]]; then
-              submodule_fatal=$((submodule_fatal + 1))
+            else
+              rc=$?
+              [[ $rc -eq 2 ]] && submodule_fatal=$((submodule_fatal + 1))
             fi
           done
           [[ $submodule_fatal -gt 0 ]] && {
