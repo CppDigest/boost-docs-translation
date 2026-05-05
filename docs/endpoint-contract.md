@@ -1,0 +1,187 @@
+# Endpoint contract (first pass)
+
+**Status:** first-pass operator doc. Per-surface labels: **documented** (caller + server checked), **partial** (caller only or server only), **unknown** (not verified here).
+
+**Repos:** caller = this repo (`boost-docs-translation`); Weblate server = [`cppalliance/weblate`](https://github.com/cppalliance/weblate) (`weblate.boost_endpoint` app).
+
+## Overview and system boundary
+
+This integration touches:
+
+1. **GitHub** — `POST /repos/{owner}/{repo}/dispatches` to trigger workflows (operators or helper scripts).
+2. **Weblate** — `POST …/boost-endpoint/add-or-update/` from `start-translation.yml` after submodule sync (fire-and-forget from the workflow’s perspective).
+
+```mermaid
+flowchart LR
+  subgraph operators [Operators_and_scripts]
+    trigStart[trigger-start-translation.sh]
+    trigAdd[trigger-add-submodules.sh]
+  end
+  subgraph github [GitHub_API]
+    dispatches[POST_repos_dispatches]
+  end
+  subgraph gha [boost-docs-translation_GHA]
+    wfStart[start-translation.yml]
+    wfAdd[add-submodules.yml]
+    wfSync[sync-translation.yml]
+  end
+  subgraph weblate [Weblate_instance]
+    addOrUpdate[boost-endpoint_add-or-update]
+  end
+  trigStart --> dispatches
+  trigAdd --> dispatches
+  dispatches --> wfStart
+  dispatches --> wfAdd
+  dispatches --> wfSync
+  wfStart --> addOrUpdate
+```
+
+---
+
+## Endpoint inventory
+
+| # | Surface | Method | Path / URL | Caller in this repo | Label |
+|---|---------|--------|------------|---------------------|--------|
+| 1 | GitHub Actions | `POST` | `https://api.github.com/repos/{owner}/{repo}/dispatches` | `scripts/trigger-start-translation.sh`, `scripts/trigger-add-submodules.sh` | **documented** |
+| 2 | GitHub Actions | `POST` | same as (1) | Manual / external automation for `sync-translation` (no `scripts/trigger-*.sh` here) | **partial** |
+| 3 | Weblate `boost_endpoint` | `POST` | `{WEBLATE_URL}/boost-endpoint/add-or-update/` | `.github/workflows/start-translation.yml` (`trigger_weblate`) | **documented** |
+| 4 | Weblate `boost_endpoint` | `GET` | `{WEBLATE_URL}/boost-endpoint/` | *Not called by this repo* | **partial** (server only) |
+
+`WEBLATE_URL` is a repository secret; the workflow strips a trailing slash before appending `/boost-endpoint/add-or-update/`.
+
+---
+
+## 1. GitHub `repository_dispatch` (`POST …/dispatches`)
+
+**Purpose:** Trigger a workflow in this repository via the [GitHub dispatches API](https://docs.github.com/en/rest/repos/repos#create-a-repository-dispatch-event).
+
+### Common contract (helper scripts)
+
+| Item | Value |
+|------|--------|
+| URL | `https://api.github.com/repos/{owner}/{repo}/dispatches` |
+| Method | `POST` |
+| Auth | `Authorization: Bearer {PAT}` (scripts use `GH_TOKEN` / `GITHUB_TOKEN` / `--token`) |
+| Headers | `Accept: application/vnd.github+json`, `X-GitHub-Api-Version: 2022-11-28`, `Content-Type: application/json` |
+| Success | HTTP **204** (scripts treat only `204` as success and print the response body on failure) |
+| Caller validation | Scripts capture HTTP status; they do **not** parse a success JSON body (GitHub returns empty body on success). |
+
+### `event_type: add-submodules`
+
+| Item | Detail |
+|------|--------|
+| Workflow | `.github/workflows/add-submodules.yml` |
+| Body shape | `{"event_type":"add-submodules","client_payload":{...}}` |
+| `client_payload` | All optional: `version`, `submodules` (list-like string), `lang_codes` (comma-separated). See [README](../README.md). |
+| Script | `scripts/trigger-add-submodules.sh` builds JSON with `jq` or Python; omits empty optional fields. |
+
+### `event_type: start-translation`
+
+| Item | Detail |
+|------|--------|
+| Workflow | `.github/workflows/start-translation.yml` |
+| Body shape | `{"event_type":"start-translation","client_payload":{...}}` |
+| `client_payload` | Optional: `version`, `lang_codes`, `extensions`. See [README](../README.md). |
+| Script | `scripts/trigger-start-translation.sh` |
+
+### `event_type: sync-translation`
+
+| Item | Detail |
+|------|--------|
+| Workflow | `.github/workflows/sync-translation.yml` |
+| Body shape | `{"event_type":"sync-translation"}` (no `client_payload`) |
+| Script in repo | **None** — operators must call the API (or use GitHub UI) themselves. Header example in workflow file. |
+
+---
+
+## 2. Weblate `POST …/boost-endpoint/add-or-update/`
+
+**Purpose:** Tell the Weblate fork to add/update Boost doc components for a set of languages and submodule names.
+
+### Caller contract (`start-translation.yml`)
+
+| Item | Value |
+|------|--------|
+| URL | `${WEBLATE_URL%/}/boost-endpoint/add-or-update/` |
+| Method | `POST` |
+| Headers | `Authorization: Token {WEBLATE_TOKEN}`, `Content-Type: application/json`, `User-Agent: BoostDocsSync/1.0` |
+| Body (JSON) | `organization` (string), `add_or_update` (object: language code → array of submodule name strings), `version` (string), `extensions` (JSON array of extension strings, may be `[]`) |
+| `organization` value | `MODULE_ORG` from `.github/workflows/assets/env.sh`: repository variable `SUBMODULES_ORG` if set, else GitHub org of this repo (`GITHUB_REPOSITORY` owner). |
+| Timeout | `curl -m 5` (5 seconds max time) |
+| Response handling | Response body discarded (`curl -o /dev/null`). **No HTTP status check.** |
+| Exit code handling | `curl` exit **0** or **28** (timeout) → log success (“triggered”). Any other exit code → log failure. |
+
+**Current-state risk:** A slow HTTP 200 or a 4xx/5xx that still fits in 5s may be ignored at the HTTP layer; timeouts are explicitly treated as success.
+
+### When the POST is skipped
+
+If `add_or_update` would serialize to `{}` (no submodules produced updates for any language), `trigger_weblate` returns without calling Weblate (`weblate.boost_endpoint` serializer also rejects an empty map — see server section).
+
+### Server contract (`cppalliance/weblate`)
+
+Validated against `cppalliance/weblate` @ default branch (paths under `weblate/boost_endpoint/`):
+
+| Item | Value |
+|------|--------|
+| Mount | `path("boost-endpoint/", include("weblate.boost_endpoint.urls"))` when `weblate.boost_endpoint` is in `INSTALLED_APPS` (`weblate/urls.py`). |
+| POST route | `add-or-update/` → `AddOrUpdateView` |
+| Auth | `IsAuthenticated` (DRF). Token style used by caller matches typical Weblate/API token usage. |
+| Request schema | `AddOrUpdateRequestSerializer`: `organization` (required string), `add_or_update` (required dict, **non-empty**, values are lists of strings), `version` (required string), `extensions` (optional list of strings or null). |
+| Success | HTTP **200** with JSON body = per-`lang_code` result map from `BoostComponentService.process_all`. |
+| Validation failure | HTTP **400** with `{"errors": …}` |
+| Server error | HTTP **500** with `{"error": "<message>"}` |
+
+**Alignment:** Caller JSON keys `organization`, `add_or_update`, `version`, `extensions` match serializer field names. Submodule lists are JSON arrays of strings, as expected.
+
+---
+
+## 3. Weblate `GET …/boost-endpoint/` (informational)
+
+**Server:** `BoostEndpointInfo` — returns JSON such as `module`, `description`.
+
+**This repo:** No workflow or script calls this endpoint today. Useful for manual health checks with the same token as the POST.
+
+**Label:** **partial** (documented server behavior only).
+
+---
+
+## Error handling and observability gaps
+
+| Gap | Impact |
+|-----|--------|
+| Weblate POST ignores HTTP status and body | False confidence if server returns 400/500 quickly. |
+| Timeout = success (curl 28) | Fire-and-forget may hide overload or network issues. |
+| No in-repo script for `sync-translation` | Easy to mistype dispatch JSON or target repo. |
+
+---
+
+## Open questions / backlog
+
+| Item | Notes |
+|------|--------|
+| `GET /boost-endpoint/` | Decide if CI should probe it before POST (out of scope for this doc pass). |
+| Other `boost_endpoint` routes | Only `""` and `add-or-update/` under app `urls.py` today; re-check if fork adds CI hooks. |
+| Auth details | Confirm token type (Weblate user token vs project token) in deployment docs. |
+| Retry policy | No retries in workflow; document any future retry/idempotency expectations with server owners. |
+| `sync-translation` helper | Optional: add `scripts/trigger-sync-translation.sh` mirroring other triggers. |
+
+---
+
+## Source index (this repo)
+
+| Topic | File |
+|--------|------|
+| Weblate POST | `.github/workflows/start-translation.yml` (`trigger_weblate`) |
+| `MODULE_ORG` / `organization` | `.github/workflows/assets/env.sh` |
+| Dispatch: start | `scripts/trigger-start-translation.sh` |
+| Dispatch: add-submodules | `scripts/trigger-add-submodules.sh` |
+| Workflow triggers & payload tables | `README.md` |
+
+## Source index (Weblate fork)
+
+| Topic | Path in `cppalliance/weblate` |
+|--------|-------------------------------|
+| Mount | `weblate/urls.py` (`boost-endpoint/`) |
+| Routes | `weblate/boost_endpoint/urls.py` |
+| POST handler | `weblate/boost_endpoint/views.py` (`AddOrUpdateView`) |
+| Request validation | `weblate/boost_endpoint/serializers.py` |
