@@ -1,6 +1,6 @@
 # Endpoint contract
 
-**Status:** Operator-facing contract; per-surface labels: **documented** (caller + server checked), **partial** (caller only or server only), **unknown** (not verified here). **Caller sections** for Weblate below match **`start-translation.yml`** as of this doc (HTTP **202**/**200**, **120s** `curl` timeout, response bodies logged).
+**Status:** Operator-facing contract; per-surface labels: **documented** (caller + server checked), **partial** (caller only or server only), **unknown** (not verified here). **Caller sections** for Weblate below match **`start-translation.yml`** as of this doc (HTTP **202**/**200**, response bodies logged).
 
 **Repos:** caller = this repo (`boost-docs-translation`); Weblate server implementation = [`cppalliance/weblate`](https://github.com/cppalliance/weblate) (`weblate.boost_endpoint` Django app). Anyone can verify the server sections against that public repository; file paths below are relative to its root.
 
@@ -9,7 +9,7 @@
 This integration touches:
 
 1. **GitHub** — `POST /repos/{owner}/{repo}/dispatches` to trigger workflows (operators or helper scripts); **`sync-translation`** also runs on a **daily schedule**.
-2. **Weblate** — `POST …/boost-endpoint/add-or-update/` from `start-translation.yml` after submodule sync. The server typically responds quickly with **HTTP 202** (async processing); the workflow waits up to **120s**, checks the status code, and logs the response body on success or failure.
+2. **Weblate** — `POST …/boost-endpoint/add-or-update/` from `start-translation.yml` after submodule sync. The server typically responds quickly with **HTTP 202** (async processing); the workflow checks the status code, and logs the response body on success or failure.
 
 ```mermaid
 flowchart LR
@@ -115,8 +115,6 @@ flowchart LR
 | Success              | HTTP **202** — workflow logs “async” and pretty-prints JSON from the response body (`jq`). HTTP **200** — also treated as success (“sync server”); body printed to logs.            |
 | Failure              | Any HTTP status other than **202** or **200**, or non-zero `curl` exit (includes timeouts). Response body is printed to the log when captured.                                      |
 
-**Residual risk:** A **slow** server may hold the job for up to **120s** before failing; operators should watch Actions logs for Weblate errors even when HTTP status is success (async work continues on the server after **202**).
-
 ### When the POST is skipped
 
 If `add_or_update` would serialize to `{}` (no submodules produced updates for any language), `trigger_weblate` returns without calling Weblate (`weblate.boost_endpoint` serializer also rejects an empty map — see server section).
@@ -149,28 +147,6 @@ The following matches the published [`cppalliance/weblate`](https://github.com/c
 
 ---
 
-## Error handling and observability gaps
-
-| Gap                                                      | Impact                                                                                 |
-| -------------------------------------------------------- | -------------------------------------------------------------------------------------- |
-| Async **202** success does not imply components finished | Operators must rely on Weblate/UI or server logs for processing failures after accept. |
-| Long blocking wait (up to **120s**)                      | Failed or slow Weblate ties up the Actions step until timeout.                         |
-| No in-repo script for `sync-translation`                 | Easy to mistype manual dispatch JSON or target repo (scheduled runs avoid this).       |
-
----
-
-## Open questions / backlog
-
-| Item                          | Notes                                                                                                                       |
-| ----------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| `GET /boost-endpoint/`        | Decide if CI should probe it before POST (out of scope for this doc pass).                                                  |
-| Other `boost_endpoint` routes | Only `""` and `add-or-update/` under app `urls.py` today; re-check if fork adds CI hooks.                                   |
-| Auth details                  | Confirm token type (Weblate user token vs project token) in deployment docs.                                                |
-| Retry policy                  | No retries in workflow; document any future retry/idempotency expectations with server owners.                              |
-| `sync-translation` helper     | Optional: add `scripts/trigger-sync-translation.sh` mirroring other triggers (schedule already covers unattended roll-ups). |
-
----
-
 ## Source index (this repo)
 
 | Topic                                    | File                                                          |
@@ -182,7 +158,7 @@ The following matches the published [`cppalliance/weblate`](https://github.com/c
 | Dispatch: add-submodules                 | `scripts/trigger-add-submodules.sh`                           |
 | Workflow triggers & payload tables       | `README.md`                                                   |
 
-## Source index (Weblate fork)
+## Source index (Weblate)
 
 | Topic              | Path in `cppalliance/weblate`                                              |
 | ------------------ | -------------------------------------------------------------------------- |
